@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
 import pdfplumber
 import docx
 import json
@@ -7,6 +7,7 @@ import random
 from PIL import Image
 import io
 import os
+import base64
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -21,16 +22,9 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Inter:wght@300;400;500&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-}
-
-h1, h2, h3 {
-    font-family: 'Syne', sans-serif;
-}
-
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+h1, h2, h3 { font-family: 'Syne', sans-serif; }
 .main { background-color: #0f0f13; color: #e8e8f0; }
-
 .stApp { background-color: #0f0f13; }
 
 section[data-testid="stSidebar"] {
@@ -63,10 +57,7 @@ section[data-testid="stSidebar"] {
     border-radius: 16px;
     padding: 1.5rem;
     margin-bottom: 1rem;
-    transition: border-color 0.2s;
 }
-
-.card:hover { border-color: #a78bfa; }
 
 .flashcard {
     background: linear-gradient(135deg, #1e1e2e, #16213e);
@@ -79,15 +70,7 @@ section[data-testid="stSidebar"] {
     align-items: center;
     justify-content: center;
     font-size: 1.2rem;
-    cursor: pointer;
-    transition: all 0.3s;
     margin: 1rem 0;
-}
-
-.flashcard:hover {
-    border-color: #a78bfa;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(167,139,250,0.15);
 }
 
 .badge {
@@ -143,18 +126,6 @@ section[data-testid="stSidebar"] {
     border-radius: 10px !important;
 }
 
-.stSelectbox > div > div {
-    background: #16161e !important;
-    border: 1px solid #2a2a3a !important;
-    color: #e8e8f0 !important;
-}
-
-div[data-testid="stExpander"] {
-    background: #16161e;
-    border: 1px solid #2a2a3a;
-    border-radius: 12px;
-}
-
 .stProgress > div > div {
     background: linear-gradient(90deg, #7c3aed, #60a5fa);
 }
@@ -164,13 +135,12 @@ hr { border-color: #2a2a3a; }
 """, unsafe_allow_html=True)
 
 # ─── API SETUP ────────────────────────────────────────────────────────────────
-def init_gemini():
-    api_key = st.secrets.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+def get_groq_client():
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        st.sidebar.error("⚠️ No se encontró la API key. Configurala en Streamlit Secrets.")
-        return False
-    genai.configure(api_key=api_key)
-    return True
+        st.sidebar.error("⚠️ No se encontró la API key de Groq. Configurala en Streamlit Secrets.")
+        return None
+    return Groq(api_key=api_key)
 
 # ─── EXTRACCIÓN DE TEXTO ──────────────────────────────────────────────────────
 def extract_text_from_pdf(file):
@@ -186,22 +156,28 @@ def extract_text_from_docx(file):
     doc = docx.Document(file)
     return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
 
-def extract_text_from_image(file):
-    model = genai.GenerativeModel("gemini-2.0-flash")
+def extract_text_from_image(file, client):
     img = Image.open(file)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    response = model.generate_content([
-        "Transcribí todo el texto que aparece en esta imagen de apunte o material de estudio. "
-        "Mantené la estructura original lo mejor posible.",
-        {"mime_type": "image/png", "data": buf.getvalue()}
-    ])
-    return response.text
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    response = client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Transcribí todo el texto que aparece en esta imagen de apunte o material de estudio. Mantené la estructura original lo mejor posible."},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+            ]
+        }],
+        max_tokens=4000
+    )
+    return response.choices[0].message.content
 
 # ─── GENERACIÓN CON IA ────────────────────────────────────────────────────────
-def generate_study_content(text):
-    model = genai.GenerativeModel("gemini-2.0-flash")
+def generate_study_content(text, client):
     prompt = f"""Analizá el siguiente material de estudio y generá contenido de estudio en formato JSON.
 
 Respondé ÚNICAMENTE con un JSON válido con esta estructura exacta:
@@ -230,9 +206,13 @@ Generá al menos:
 MATERIAL DE ESTUDIO:
 {text[:12000]}
 """
-    response = model.generate_content(prompt)
-    raw = response.text.strip()
-    # Limpiar markdown si viene con backticks
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=4000,
+        temperature=0.3
+    )
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -267,11 +247,11 @@ with st.sidebar:
 st.markdown('<div class="hero-title">EstudioIA</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">Subí tu material de facultad y la IA genera todo lo que necesitás para estudiar</div>', unsafe_allow_html=True)
 
-if not init_gemini():
-    st.info("👈 Configurá tu API key de Gemini en los secrets de Streamlit para comenzar.")
+client = get_groq_client()
+if not client:
+    st.info("👈 Configurá tu API key de Groq en los secrets de Streamlit para comenzar.")
     st.stop()
 
-# Tabs principales
 tab1, tab2, tab3, tab4 = st.tabs(["📋 Resumen", "🃏 Flashcards", "🧪 Quiz", "💡 Conceptos"])
 
 # ─── PROCESAMIENTO ────────────────────────────────────────────────────────────
@@ -285,7 +265,7 @@ if analizar:
                 elif input_method == "📝 Word (.docx)":
                     text = extract_text_from_docx(uploaded_file)
                 elif input_method == "📸 Imagen/Foto":
-                    text = extract_text_from_image(uploaded_file)
+                    text = extract_text_from_image(uploaded_file, client)
             elif pasted_text:
                 text = pasted_text
 
@@ -299,7 +279,7 @@ if analizar:
 
     with st.spinner("🤖 La IA está analizando tu material..."):
         try:
-            content = generate_study_content(text)
+            content = generate_study_content(text, client)
             st.session_state["content"] = content
             st.session_state["quiz_idx"] = 0
             st.session_state["quiz_score"] = 0
@@ -315,12 +295,10 @@ if analizar:
 if "content" in st.session_state:
     c = st.session_state["content"]
 
-    # TAB 1: RESUMEN
     with tab1:
         st.markdown("### 📋 Resumen del tema")
         st.markdown(f'<div class="card">{c["resumen"]}</div>', unsafe_allow_html=True)
 
-    # TAB 2: FLASHCARDS
     with tab2:
         st.markdown("### 🃏 Flashcards")
         cards = c["flashcards"]
@@ -364,7 +342,6 @@ if "content" in st.session_state:
             st.session_state["flash_show_answer"] = False
             st.rerun()
 
-    # TAB 3: QUIZ
     with tab3:
         st.markdown("### 🧪 Quiz de práctica")
         quiz = c["quiz"]
@@ -380,9 +357,8 @@ if "content" in st.session_state:
 
         if q_idx < total_q:
             q = quiz[q_idx]
-            st.progress((q_idx) / total_q)
+            st.progress(q_idx / total_q)
             st.markdown(f'<p style="color:#6b7280;">Pregunta {q_idx + 1} de {total_q} · Puntaje: {st.session_state["quiz_score"]}/{q_idx}</p>', unsafe_allow_html=True)
-
             st.markdown(f'<div class="card"><b>{q["pregunta"]}</b></div>', unsafe_allow_html=True)
 
             if q_idx not in [a["idx"] for a in answered]:
@@ -420,15 +396,13 @@ if "content" in st.session_state:
                 st.session_state["quiz_answered"] = []
                 st.rerun()
 
-    # TAB 4: CONCEPTOS
     with tab4:
         st.markdown("### 💡 Conceptos clave")
         conceptos = c["conceptos_clave"]
-        pills_html = "".join([f'<span class="concept-pill">✦ {c}</span>' for c in conceptos])
+        pills_html = "".join([f'<span class="concept-pill">✦ {con}</span>' for con in conceptos])
         st.markdown(f'<div class="card">{pills_html}</div>', unsafe_allow_html=True)
 
 else:
-    # Estado vacío
     with tab1:
         st.markdown("""
         <div class="card" style="text-align:center; padding:3rem;">
