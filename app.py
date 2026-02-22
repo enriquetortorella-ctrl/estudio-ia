@@ -187,7 +187,7 @@ def extract_text_from_docx(file):
     return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
 
 def extract_text_from_image(file):
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
     img = Image.open(file)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -201,7 +201,7 @@ def extract_text_from_image(file):
 
 # ─── GENERACIÓN CON IA ────────────────────────────────────────────────────────
 def generate_study_content(text):
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
     prompt = f"""Analizá el siguiente material de estudio y generá contenido de estudio en formato JSON.
 
 Respondé ÚNICAMENTE con un JSON válido con esta estructura exacta:
