@@ -225,14 +225,22 @@ def process_files(files, groq):
 # ─── IA ───────────────────────────────────────────────────────────────────────
 def generate_content(text, materia, groq):
     # LLAMADA 1: Resumen extenso
-    prompt_resumen = f"""Sos un profesor universitario experto en "{materia}".
-Escribí un RESUMEN MUY COMPLETO Y DETALLADO del siguiente material de estudio.
-Desarrollá TODOS los temas en profundidad con ejemplos concretos.
-Para cada tema escribí varios párrafos explicando el concepto, su importancia y aplicación práctica.
-El resumen debe ser tan completo que el estudiante no necesite releer el original.
-Escribí solo el resumen en texto plano, sin títulos especiales ni formato JSON.
+    prompt_resumen = f"""Sos un profesor universitario experto en "{materia}" y tu objetivo es ayudar a un estudiante a prepararse para un parcial universitario.
 
-MATERIAL:
+Escribí un resumen académico completo del material, organizado de la siguiente manera:
+
+Para cada tema importante del material:
+1. DEFINICIÓN FORMAL del concepto (como aparecería en un libro universitario)
+2. DESARROLLO EN PROFUNDIDAD: explicá el tema como si se lo explicaras a un estudiante que nunca lo vio, con ejemplos concretos y aplicaciones reales
+3. PUNTOS CRÍTICOS: qué es lo que más importa entender, qué suelen preguntar en los parciales sobre este tema
+4. CONEXIÓN CON OTROS TEMAS: cómo se relaciona con el resto del material
+
+Al final agregá una sección "LO MÁS IMPORTANTE PARA EL PARCIAL" con los 5-7 puntos clave que el estudiante no puede no saber.
+
+Usá lenguaje académico pero claro. No hagas bullet points simples, desarrollá cada punto en párrafos completos.
+Escribí solo el resumen en texto plano, sin formato JSON.
+
+MATERIAL DE {materia}:
 {text[:14000]}"""
 
     r1 = groq.chat.completions.create(
@@ -243,18 +251,27 @@ MATERIAL:
     resumen = r1.choices[0].message.content.strip()
 
     # LLAMADA 2: Flashcards, quiz y conceptos
-    prompt_estudio = f"""Sos un profesor universitario experto en "{materia}".
-Analizá el siguiente material y respondé ÚNICAMENTE con JSON válido, sin texto extra:
+    prompt_estudio = f"""Sos un profesor universitario experto en "{materia}" preparando a un estudiante para un parcial universitario.
+Analizá el material y respondé ÚNICAMENTE con JSON válido, sin texto extra:
 {{
-  "conceptos_clave": ["CONCEPTO: definición clara y completa"],
-  "flashcards": [{{"pregunta": "¿Pregunta específica?", "respuesta": "Respuesta completa con ejemplos en 2-3 oraciones."}}],
-  "quiz": [{{"pregunta": "¿Pregunta?", "opciones": ["A) ...", "B) ...", "C) ...", "D) ..."], "correcta": "A) ...", "explicacion": "Por qué es correcta y por qué las otras no."}}]
+  "conceptos_clave": ["CONCEPTO: definición académica completa, incluyendo su importancia y contexto"],
+  "flashcards": [
+    {{"pregunta": "¿Pregunta específica sobre el material?", "respuesta": "Respuesta académica completa, con definición, desarrollo y ejemplo concreto. Mínimo 3 oraciones."}}
+  ],
+  "quiz": [
+    {{
+      "pregunta": "Pregunta de análisis o aplicación (no solo definición)",
+      "opciones": ["A) opción", "B) opción", "C) opción", "D) opción"],
+      "correcta": "A) opción",
+      "explicacion": "Explicación detallada de por qué es correcta, qué concepto evalúa, y por qué las otras opciones están mal."
+    }}
+  ]
 }}
 
-REQUISITOS:
-- conceptos_clave: exactamente 8 ítems
-- flashcards: exactamente 10 ítems
-- quiz: exactamente 6 ítems
+REQUISITOS ESTRICTOS:
+- conceptos_clave: exactamente 8, con definiciones académicas completas
+- flashcards: exactamente 10, con respuestas desarrolladas (no de una sola línea)
+- quiz: exactamente 6, con preguntas que requieran ANÁLISIS y APLICACIÓN, no solo memorización. Incluí preguntas tipo "¿Qué pasaría si...?", "¿Cuál es la diferencia entre...?", "En el siguiente caso práctico...". Las opciones incorrectas deben ser plausibles, no obviamente falsas.
 
 MATERIAL DE {materia}:
 {text[:10000]}"""
