@@ -217,19 +217,28 @@ def process_files(files, groq):
 
 # ─── IA ───────────────────────────────────────────────────────────────────────
 def generate_content(text, materia, groq):
-    prompt = f"""Sos un profesor experto en "{materia}". Analizá el material y respondé ÚNICAMENTE con JSON válido:
+    prompt = f"""Sos un profesor universitario experto en "{materia}". Analizá el material y generá contenido COMPLETO Y DETALLADO para estudiar.
+
+Respondé ÚNICAMENTE con JSON válido:
 {{
-  "resumen": "Resumen en 3-5 párrafos",
-  "conceptos_clave": ["concepto1", "concepto2"],
-  "flashcards": [{{"pregunta": "¿...?", "respuesta": "..."}}],
-  "quiz": [{{"pregunta": "¿...?", "opciones": ["A) ...", "B) ...", "C) ...", "D) ..."], "correcta": "A) ...", "explicacion": "..."}}]
+  "resumen": "RESUMEN EXTENSO: desarrollá TODOS los temas en profundidad con ejemplos concretos. Para cada tema importante escribí varios párrafos explicando el concepto, su importancia y aplicación. Tan completo que el estudiante no necesite releer el original. Mínimo 800 palabras.",
+  "conceptos_clave": ["CONCEPTO: definición completa y clara"],
+  "flashcards": [{{"pregunta": "¿Pregunta específica?", "respuesta": "Respuesta completa con ejemplos. Mínimo 3 oraciones."}}],
+  "quiz": [{{"pregunta": "¿Pregunta?", "opciones": ["A) ...", "B) ...", "C) ...", "D) ..."], "correcta": "A) ...", "explicacion": "Por qué es correcta y por qué las otras no."}}]
 }}
-Mínimo: 8 flashcards, 5 quiz, 6 conceptos.
-MATERIAL: {text[:14000]}"""
+
+REQUISITOS:
+- Resumen: mínimo 800 palabras, cubrir todos los temas
+- Flashcards: mínimo 12, respuestas detalladas
+- Quiz: mínimo 7 preguntas con buenas explicaciones
+- Conceptos: mínimo 8 con definiciones claras
+
+MATERIAL DE {materia}:
+{text[:14000]}"""
     r = groq.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=4000, temperature=0.3
+        max_tokens=6000, temperature=0.3
     )
     raw = r.choices[0].message.content.strip()
     if raw.startswith("```"):
