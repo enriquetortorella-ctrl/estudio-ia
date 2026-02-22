@@ -401,8 +401,8 @@ st.markdown(f'<div class="materia-badge">🎓 {materia}</div>', unsafe_allow_htm
 tab1, tab2, tab3, tab4 = st.tabs(["📋 Resumen", "🃏 Flashcards", "🧪 Quiz", "💡 Conceptos"])
 
 # ─── BUSCAR MATERIAL GUARDADO ─────────────────────────────────────────────────
-compartido = cargar_compartido(sb, materia)
-personal = cargar_personal(sb, usuario, materia)
+compartido = cargar_compartido(materia, gh_token, gh_user, gh_repo)
+personal = cargar_personal(usuario, materia, gh_token, gh_user, gh_repo)
 
 # Opciones de carga si hay guardado
 if not analizar and not st.session_state.get("content"):
