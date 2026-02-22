@@ -1,6 +1,5 @@
 import streamlit as st
 from groq import Groq
-from supabase import create_client
 import pdfplumber
 import docx
 import json
@@ -9,6 +8,7 @@ from PIL import Image
 import io
 import os
 import base64
+import requests
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -117,63 +117,70 @@ hr { border-color: #2a2a3a; }
 @st.cache_resource
 def get_clients():
     groq_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
-    sb_url = st.secrets.get("SUPABASE_URL", "") or os.environ.get("SUPABASE_URL", "")
-    sb_key = st.secrets.get("SUPABASE_KEY", "") or os.environ.get("SUPABASE_KEY", "")
     groq = Groq(api_key=groq_key) if groq_key else None
-    sb = create_client(sb_url, sb_key) if sb_url and sb_key else None
-    return groq, sb
+    return groq
 
-# ─── SUPABASE: cargar y guardar ───────────────────────────────────────────────
-def cargar_compartido(sb, materia):
-    try:
-        r = sb.table("material_compartido").select("contenido, subido_por, updated_at").eq("materia", materia).execute()
-        if r.data:
-            return r.data[0]
-    except:
-        pass
-    return None
+def get_github_config():
+    token = st.secrets.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_TOKEN", "")
+    usuario = st.secrets.get("GITHUB_USER", "") or os.environ.get("GITHUB_USER", "")
+    repo = st.secrets.get("GITHUB_REPO", "") or os.environ.get("GITHUB_REPO", "")
+    return token, usuario, repo
 
-def guardar_compartido(sb, materia, contenido, usuario):
-    try:
-        sb.table("material_compartido").upsert({
-            "materia": materia, "contenido": contenido,
-            "subido_por": usuario, "updated_at": "now()"
-        }, on_conflict="materia").execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al guardar compartido: {e}")
-        return False
+# ─── GITHUB: cargar y guardar ────────────────────────────────────────────────
+def gh_filename(tipo, usuario, materia):
+    """Genera nombre de archivo seguro para GitHub."""
+    safe = materia.replace(" ", "_").replace("/", "-")
+    if tipo == "compartido":
+        return f"data/compartido/{safe}.json"
+    else:
+        safe_u = usuario.replace(" ", "_")
+        return f"data/personal/{safe_u}/{safe}.json"
 
-def cargar_personal(sb, usuario, materia):
-    try:
-        r = sb.table("historial_personal").select("contenido").eq("usuario", usuario).eq("materia", materia).execute()
-        if r.data:
-            return r.data[0]["contenido"]
-    except:
-        pass
-    return None
+def gh_get(path, token, gh_user, repo):
+    url = f"https://api.github.com/repos/{gh_user}/{repo}/contents/{path}"
+    r = requests.get(url, headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"})
+    if r.status_code == 200:
+        data = r.json()
+        content = base64.b64decode(data["content"]).decode("utf-8")
+        return json.loads(content), data["sha"]
+    return None, None
 
-def guardar_personal(sb, usuario, materia, contenido):
-    try:
-        sb.table("historial_personal").upsert({
-            "usuario": usuario, "materia": materia, "contenido": contenido
-        }, on_conflict="usuario,materia").execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al guardar personal: {e}")
-        return False
+def gh_put(path, content_dict, token, gh_user, repo, sha=None):
+    url = f"https://api.github.com/repos/{gh_user}/{repo}/contents/{path}"
+    body = {
+        "message": f"EstudioIA: actualizar {path}",
+        "content": base64.b64encode(json.dumps(content_dict, ensure_ascii=False).encode()).decode()
+    }
+    if sha:
+        body["sha"] = sha
+    r = requests.put(url, headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}, json=body)
+    return r.status_code in [200, 201]
 
-def listar_materias_guardadas(sb, usuario):
-    compartidas, personales = [], []
-    try:
-        r = sb.table("material_compartido").select("materia, subido_por, updated_at").execute()
-        compartidas = r.data or []
-    except: pass
-    try:
-        r = sb.table("historial_personal").select("materia").eq("usuario", usuario).execute()
-        personales = [x["materia"] for x in (r.data or [])]
-    except: pass
-    return compartidas, personales
+def cargar_compartido(materia, token, gh_user, repo):
+    path = gh_filename("compartido", None, materia)
+    data, _ = gh_get(path, token, gh_user, repo)
+    return data
+
+def guardar_compartido(materia, contenido, usuario, token, gh_user, repo):
+    path = gh_filename("compartido", None, materia)
+    _, sha = gh_get(path, token, gh_user, repo)
+    payload = {"materia": materia, "contenido": contenido, "subido_por": usuario}
+    ok = gh_put(path, payload, token, gh_user, repo, sha)
+    if not ok:
+        st.warning("No se pudo guardar el material compartido.")
+
+def cargar_personal(usuario, materia, token, gh_user, repo):
+    path = gh_filename("personal", usuario, materia)
+    data, _ = gh_get(path, token, gh_user, repo)
+    return data["contenido"] if data else None
+
+def guardar_personal(usuario, materia, contenido, token, gh_user, repo):
+    path = gh_filename("personal", usuario, materia)
+    _, sha = gh_get(path, token, gh_user, repo)
+    payload = {"usuario": usuario, "materia": materia, "contenido": contenido}
+    ok = gh_put(path, payload, token, gh_user, repo, sha)
+    if not ok:
+        st.warning("No se pudo guardar el material personal.")
 
 # ─── EXTRACCIÓN ───────────────────────────────────────────────────────────────
 def extract_pdf(file):
@@ -376,12 +383,13 @@ with st.sidebar:
 st.markdown('<div class="hero-title">EstudioIA</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">UNLa · Economía Empresarial · Material guardado en la nube</div>', unsafe_allow_html=True)
 
-groq, sb = get_clients()
+groq = get_clients()
 if not groq:
     st.error("Falta GROQ_API_KEY en los secrets.")
     st.stop()
-if not sb:
-    st.error("Faltan SUPABASE_URL y SUPABASE_KEY en los secrets.")
+gh_token, gh_user, gh_repo = get_github_config()
+if not gh_token:
+    st.error("Falta GITHUB_TOKEN en los secrets.")
     st.stop()
 
 if not usuario:
@@ -441,8 +449,8 @@ if analizar:
             content = generate_content(text, materia, groq)
 
             # Guardar en ambos lados
-            guardar_personal(sb, usuario, materia, content)
-            guardar_compartido(sb, materia, content, usuario)
+            guardar_personal(usuario, materia, content, gh_token, gh_user, gh_repo)
+            guardar_compartido(materia, content, usuario, gh_token, gh_user, gh_repo)
 
             st.session_state["content"] = content
             st.session_state.update({"quiz_idx": 0, "quiz_score": 0, "quiz_answered": [], "flash_idx": 0, "flash_show_answer": False})
