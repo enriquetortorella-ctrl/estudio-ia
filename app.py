@@ -217,34 +217,53 @@ def process_files(files, groq):
 
 # ─── IA ───────────────────────────────────────────────────────────────────────
 def generate_content(text, materia, groq):
-    prompt = f"""Sos un profesor universitario experto en "{materia}". Analizá el material y generá contenido COMPLETO Y DETALLADO para estudiar.
+    # LLAMADA 1: Resumen extenso
+    prompt_resumen = f"""Sos un profesor universitario experto en "{materia}".
+Escribí un RESUMEN MUY COMPLETO Y DETALLADO del siguiente material de estudio.
+Desarrollá TODOS los temas en profundidad con ejemplos concretos.
+Para cada tema escribí varios párrafos explicando el concepto, su importancia y aplicación práctica.
+El resumen debe ser tan completo que el estudiante no necesite releer el original.
+Escribí solo el resumen en texto plano, sin títulos especiales ni formato JSON.
 
-Respondé ÚNICAMENTE con JSON válido:
+MATERIAL:
+{text[:14000]}"""
+
+    r1 = groq.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt_resumen}],
+        max_tokens=3000, temperature=0.3
+    )
+    resumen = r1.choices[0].message.content.strip()
+
+    # LLAMADA 2: Flashcards, quiz y conceptos
+    prompt_estudio = f"""Sos un profesor universitario experto en "{materia}".
+Analizá el siguiente material y respondé ÚNICAMENTE con JSON válido, sin texto extra:
 {{
-  "resumen": "RESUMEN EXTENSO: desarrollá TODOS los temas en profundidad con ejemplos concretos. Para cada tema importante escribí varios párrafos explicando el concepto, su importancia y aplicación. Tan completo que el estudiante no necesite releer el original. Mínimo 800 palabras.",
-  "conceptos_clave": ["CONCEPTO: definición completa y clara"],
-  "flashcards": [{{"pregunta": "¿Pregunta específica?", "respuesta": "Respuesta completa con ejemplos. Mínimo 3 oraciones."}}],
+  "conceptos_clave": ["CONCEPTO: definición clara y completa"],
+  "flashcards": [{{"pregunta": "¿Pregunta específica?", "respuesta": "Respuesta completa con ejemplos en 2-3 oraciones."}}],
   "quiz": [{{"pregunta": "¿Pregunta?", "opciones": ["A) ...", "B) ...", "C) ...", "D) ..."], "correcta": "A) ...", "explicacion": "Por qué es correcta y por qué las otras no."}}]
 }}
 
 REQUISITOS:
-- Resumen: mínimo 800 palabras, cubrir todos los temas
-- Flashcards: mínimo 12, respuestas detalladas
-- Quiz: mínimo 7 preguntas con buenas explicaciones
-- Conceptos: mínimo 8 con definiciones claras
+- conceptos_clave: exactamente 8 ítems
+- flashcards: exactamente 10 ítems
+- quiz: exactamente 6 ítems
 
 MATERIAL DE {materia}:
-{text[:14000]}"""
-    r = groq.chat.completions.create(
+{text[:10000]}"""
+
+    r2 = groq.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=6000, temperature=0.3
+        messages=[{"role": "user", "content": prompt_estudio}],
+        max_tokens=3000, temperature=0.3
     )
-    raw = r.choices[0].message.content.strip()
+    raw = r2.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"): raw = raw[4:]
-    return json.loads(raw.strip())
+    estudio = json.loads(raw.strip())
+    estudio["resumen"] = resumen
+    return estudio
 
 # ─── RENDER CONTENIDO ─────────────────────────────────────────────────────────
 def render_content(c, tab1, tab2, tab3, tab4):
